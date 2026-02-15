@@ -1,14 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { View, Text, Button } from 'react-native';
 import { Calendar, Agenda } from 'react-native-calendars';
 
 const MyCalendar = () => {
   const today = new Date().toISOString().split('T')[0];
   const [selected, setSelected] = useState(today);
-
   const [items, setItems] = useState<Record<string, any[]>>({});
 
-  const addEvent = () => {
+  const addEvent = useCallback(() => {
     setItems(prevItems => {
       const newItems = { ...prevItems };
       if (!newItems[selected]) newItems[selected] = [];
@@ -18,11 +17,11 @@ const MyCalendar = () => {
       ];
       return newItems;
     });
-  };
+  }, [selected]);
 
-  const markedDates = {
+  const markedDates = useMemo(() => ({
     [selected]: { selected: true, selectedColor: '#00adf5', selectedTextColor: '#fff' },
-  };
+  }), [selected]);
 
   return (
     <View style={{ flex: 1 }}>
@@ -41,6 +40,7 @@ const MyCalendar = () => {
       <Button title="Add Event" onPress={addEvent} />
 
       <Agenda
+        key={Object.keys(items).length}
         items={items}
         renderItem={item => (
           <View style={{ padding: 10, backgroundColor: 'white', marginBottom: 10, borderRadius: 5 }}>
