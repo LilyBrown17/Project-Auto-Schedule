@@ -1,53 +1,47 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState } from 'react';
 import { View, Text, Button } from 'react-native';
-import { Calendar, Agenda } from 'react-native-calendars';
+import { Agenda } from 'react-native-calendars';
 
 const MyCalendar = () => {
   const today = new Date().toISOString().split('T')[0];
-  const [selected, setSelected] = useState(today);
+
   const [items, setItems] = useState<Record<string, any[]>>({});
+  const [selectedDate, setSelectedDate] = useState(today);
 
-  const addEvent = useCallback(() => {
+  const addEvent = () => {
     setItems(prevItems => {
-      const newItems = { ...prevItems };
-      if (!newItems[selected]) newItems[selected] = [];
-      newItems[selected] = [
-        ...newItems[selected],
-        { name: `New Event on ${selected}`, height: 70 },
-      ];
-      return newItems;
+      const dayItems = prevItems[selectedDate] || [];
+      return {
+        ...prevItems,
+        [selectedDate]: [
+          ...dayItems,
+          { name: `New Event on ${selectedDate}`, height: 70 },
+        ],
+      };
     });
-  }, [selected]);
-
-  const markedDates = useMemo(() => ({
-    [selected]: { selected: true, selectedColor: '#00adf5', selectedTextColor: '#fff' },
-  }), [selected]);
+  };
 
   return (
     <View style={{ flex: 1 }}>
-      <Calendar
-        current={selected}
-        onDayPress={day => setSelected(day.dateString)}
-        markedDates={markedDates}
-        theme={{
-          selectedDayBackgroundColor: '#00adf5',
-          todayTextColor: '#00adf5',
-          arrowColor: '#00adf5',
-          monthTextColor: '#00adf5',
-        }}
-      />
-
       <Button title="Add Event" onPress={addEvent} />
 
       <Agenda
-        key={Object.keys(items).length}
         items={items}
-        renderItem={item => (
-          <View style={{ padding: 10, backgroundColor: 'white', marginBottom: 10, borderRadius: 5 }}>
+        selected={selectedDate}
+        onDayPress={(day) => setSelectedDate(day.dateString)}
+        renderItem={(item) => (
+          <View
+            style={{
+              padding: 10,
+              backgroundColor: 'white',
+              marginBottom: 10,
+              borderRadius: 5,
+            }}
+          >
             <Text>{item.name}</Text>
           </View>
         )}
-        hideKnob={true}
+        hideKnob={false}
       />
     </View>
   );
