@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import { View, Text, Button } from 'react-native';
 import { Agenda } from 'react-native-calendars';
 
@@ -11,12 +11,6 @@ const MyCalendar = () => {
   const addEvent = () => {
     setItems(prevItems => {
       const dayItems = prevItems[selectedDate] || [];
-
-      if (dayItems.length > 0 && prevItems[selectedDate] === dayItems) {
-        dayItems.push({ name: `New Event on ${selectedDate}`, height: 70 });
-        return prevItems;
-      }
-
       return {
         ...prevItems,
         [selectedDate]: [
@@ -26,22 +20,6 @@ const MyCalendar = () => {
       };
     });
   };
-
-  const markedDates = useMemo(() => {
-    const marks: Record<string, { selected?: boolean; marked?: boolean; selectedColor?: string }> = {};
-
-    Object.keys(items).forEach(date => {
-      if (items[date]?.length > 0) {
-        marks[date] = { marked: true, selectedColor: '#00adf5' };
-      }
-    });
-
-    if (!marks[selectedDate]) marks[selectedDate] = {};
-    marks[selectedDate].selected = true;
-    marks[selectedDate].selectedColor = '#00adf5';
-
-    return marks;
-  }, [items, selectedDate]);
 
   return (
     <View style={{ flex: 1 }}>
@@ -64,7 +42,6 @@ const MyCalendar = () => {
           </View>
         )}
         hideKnob={false}
-        markedDates={markedDates}
       />
     </View>
   );
