@@ -1,6 +1,6 @@
 import React, {useState, useMemo, useCallback} from 'react';
 import {Alert, StyleSheet, Text, View, TouchableOpacity, Button} from 'react-native';
-import {Calendar, Agenda, DateData, AgendaEntry, AgendaSchedule} from 'react-native-calendars';
+import {Agenda, DateData, AgendaEntry, AgendaSchedule} from 'react-native-calendars';
 
 // Define a functional component called MyCalendar -- EDIT LATER [currently an example based on a tutorial]
 const MyCalendar = () => {
@@ -11,56 +11,47 @@ const MyCalendar = () => {
     setSelected(day.dateString);
   };
 
-  const markedDates = {
+  const markedDates = useMemo(() => ({
     [selected]: {
       selected: true,
       selectedColor: '#00adf5',
       selectedTextColor: '#ffffff'
     }
-  };
+  }), [selected]);
 
-  const [items, setItems] = useState({});
+  const [items, setItems] = useState<Record<string, any[]>>({})
 
   const addEvent = () => {
-    const newItems: AgendaSchedule = {...items};
+    setItems(prevItems => {
+      const dayItems = prevItems[selected] || [];
 
-    if (!newItems[selected]) {
-      newItems[selected] = [];
-    }
-
-    newItems[selected].push({
-      name: `New Event on ${selected}`,
-      day: selected,
-      height: 70
+      return {
+        ...prevItems,
+        [selected]: [
+          ...dayItems,
+          {
+            name: `New Event on ${selected}`,
+            day: selected,
+            height: 70
+          }
+        ]
+      };
     });
-
-    setItems(newItems);
   };
 
   return (
     <View>
-      <Calendar
-        current={selected}
-        onDayPress={onDayPress}
-        markedDates={markedDates}
-        theme={{
-          selectedDayBackgroundColor: '#00adf5',
-          todayTextColor: '#00adf5',
-          arrowColor: '#00adf5',
-          monthTextColor: '#00adf5'          
-        }}
-      />
-      <Button title="Add Event" onPress={addEvent} />
       <Agenda
         items={items}
         selected={selected}
+        onDayPress={onDayPress}
         renderItem={(item) => (
           <View style={{ padding: 10 }}>
             <Text>{item.name}</Text>
           </View>
         )}
-        hideKnob={true}
       />
+      <Button title="Add Event" onPress={addEvent} />
     </View>
   );
 };
