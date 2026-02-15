@@ -5,7 +5,7 @@ import { Agenda } from 'react-native-calendars';
 const MyCalendar = () => {
   const today = new Date().toISOString().split('T')[0];
 
-  const [items, setItems] = useState<Record<string, any[]>>({});
+  const [items, setItems] = useState<Record<string, any[]>>({ [today]: [] });
   const [selectedDate, setSelectedDate] = useState(today);
 
   const addEvent = () => {
@@ -13,10 +13,7 @@ const MyCalendar = () => {
       const dayItems = prevItems[selectedDate] || [];
       return {
         ...prevItems,
-        [selectedDate]: [
-          ...dayItems,
-          { name: `New Event on ${selectedDate}`, height: 70 },
-        ],
+        [selectedDate]: [...dayItems, { name: `New Event on ${selectedDate}`, height: 70 }],
       };
     });
   };
