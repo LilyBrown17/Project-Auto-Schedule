@@ -5,21 +5,16 @@ import { Calendar, Agenda } from 'react-native-calendars';
 const MyCalendar = () => {
   const initialDate = new Date().toISOString().split('T')[0];
   const [selected, setSelected] = useState(initialDate);
-  
   const [items, setItems] = useState<Record<string, any[]>>({});
-  
+
   const addEvent = () => {
     setItems(prevItems => {
       const dayItems = prevItems[selected] || [];
-      
       return {
         ...prevItems,
         [selected]: [
           ...dayItems,
-          {
-            name: `New Event on ${selected}`,
-            height: 70,
-          },
+          { name: `New Event on ${selected}`, height: 70 },
         ],
       };
     });
@@ -35,10 +30,9 @@ const MyCalendar = () => {
 
   return (
     <View style={{ flex: 1 }}>
-
       <Calendar
         current={selected}
-        onDayPress={(day) => setSelected(day.dateString)}
+        onDayPress={day => setSelected(day.dateString)}
         markedDates={markedDates}
         theme={{
           selectedDayBackgroundColor: '#00adf5',
@@ -47,9 +41,9 @@ const MyCalendar = () => {
           monthTextColor: '#00adf5',
         }}
       />
-      
+
       <Button title="Add Event" onPress={addEvent} />
-      
+
       <Agenda
         items={items}
         renderItem={(item) => (
