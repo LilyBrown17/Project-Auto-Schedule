@@ -13,7 +13,10 @@ const MyCalendar = () => {
       const dayItems = prevItems[selectedDate] || [];
       return {
         ...prevItems,
-        [selectedDate]: [...dayItems, { name: `New Event on ${selectedDate}`, height: 70 }],
+        [selectedDate]: [
+          ...dayItems,
+          { name: `New Event on ${selectedDate}`, height: 70 },
+        ],
       };
     });
   };
