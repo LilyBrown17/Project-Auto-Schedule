@@ -1,32 +1,28 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import { View, Text, Button } from 'react-native';
 import { Calendar, Agenda } from 'react-native-calendars';
 
 const MyCalendar = () => {
-  const initialDate = new Date().toISOString().split('T')[0];
-  const [selected, setSelected] = useState(initialDate);
+  const today = new Date().toISOString().split('T')[0];
+  const [selected, setSelected] = useState(today);
+
   const [items, setItems] = useState<Record<string, any[]>>({});
 
   const addEvent = () => {
     setItems(prevItems => {
-      const dayItems = prevItems[selected] || [];
-      return {
-        ...prevItems,
-        [selected]: [
-          ...dayItems,
-          { name: `New Event on ${selected}`, height: 70 },
-        ],
-      };
+      const newItems = { ...prevItems };
+      if (!newItems[selected]) newItems[selected] = [];
+      newItems[selected] = [
+        ...newItems[selected],
+        { name: `New Event on ${selected}`, height: 70 },
+      ];
+      return newItems;
     });
   };
 
-  const markedDates = useMemo(() => ({
-    [selected]: {
-      selected: true,
-      selectedColor: '#00adf5',
-      selectedTextColor: '#ffffff',
-    },
-  }), [selected]);
+  const markedDates = {
+    [selected]: { selected: true, selectedColor: '#00adf5', selectedTextColor: '#fff' },
+  };
 
   return (
     <View style={{ flex: 1 }}>
@@ -46,15 +42,8 @@ const MyCalendar = () => {
 
       <Agenda
         items={items}
-        renderItem={(item) => (
-          <View
-            style={{
-              padding: 10,
-              backgroundColor: 'white',
-              marginBottom: 10,
-              borderRadius: 5,
-            }}
-          >
+        renderItem={item => (
+          <View style={{ padding: 10, backgroundColor: 'white', marginBottom: 10, borderRadius: 5 }}>
             <Text>{item.name}</Text>
           </View>
         )}
