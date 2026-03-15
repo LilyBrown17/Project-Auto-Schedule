@@ -1,16 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import {
-  View,
-  Text,
-  Button,
-  FlatList,
-  TextInput,
-  Platform,
-  TouchableOpacity,
-  ScrollView,
-  KeyboardAvoidingView,
-  Modal,
-} from 'react-native';
+import { View, Text, Button, FlatList, TextInput, Platform, TouchableOpacity, ScrollView, KeyboardAvoidingView, Modal } from 'react-native';
 import { Calendar, DateData } from 'react-native-calendars';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -26,8 +15,12 @@ interface EventItem {
   repeat?: 'none' | 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'yearly';
   date: string;
   weeklyDays?: string[];
-  height?: number;
   reminderAssignedTime?: string;
+  repeatEndDate?: string;
+  reminderDays?: string[];
+  reminderMaxDate?: string;
+  reminderStartTime?: string;
+  reminderEndTime?: string;
 }
 
 const STORAGE_KEY = 'calendar_events';
@@ -46,7 +39,9 @@ const MyCalendar = () => {
   const [repeat, setRepeat] = useState<EventItem['repeat']>('none');
   const [weeklyDays, setWeeklyDays] = useState<string[]>([]);
   const [repeatEndDate, setRepeatEndDate] = useState<string | null>(null);
+  const [repeatEndDateObj, setRepeatEndDateObj] = useState(new Date());
   const [editingEvent, setEditingEvent] = useState<EventItem | null>(null);
+  const [editAllFuture, setEditAllFuture] = useState(false);
   const [eventType, setEventType] = useState<'normal' | 'reminder'>('normal');
   const [time, setTime] = useState(new Date());
   const [endTime, setEndTime] = useState(new Date());
@@ -54,9 +49,11 @@ const MyCalendar = () => {
   const [showEndPicker, setShowEndPicker] = useState(false);
   const [showRepeatEndPicker, setShowRepeatEndPicker] = useState(false);
   const [confirmation, setConfirmation] = useState<{ type: 'delete' | 'edit'; event: EventItem } | null>(null);
-  const [timeError, setTimeError] = useState<string | null>(null);
+  const [formErrors, setFormErrors] = useState<{time?: string, date?: string, general?: string}>({});
   const [reminderPopup, setReminderPopup] = useState<string | null>(null);
   const [showReminderModal, setShowReminderModal] = useState(false);
+
+  const createId = () => Date.now().toString(36) + Math.random().toString(36).substring(2);
 
   const parseLocalDate = (dateString: string) => {
     const [y, m, d] = dateString.split('-').map(Number);
@@ -65,6 +62,7 @@ const MyCalendar = () => {
 
   const resetForm = () => {
     setEditingEvent(null);
+    setEditAllFuture(false);
     setEventName('');
     setEventTime('');
     setEventEndTime('');
@@ -74,7 +72,7 @@ const MyCalendar = () => {
     setRepeatEndDate(null);
     setConfirmation(null);
     setEventType('normal');
-    setTimeError(null);
+    setFormErrors({});
     setReminderPopup(null);
   };
 
@@ -92,25 +90,46 @@ const MyCalendar = () => {
     const saveEvents = async () => {
       try {
         await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-      } catch {}
+      } catch (err) {
+        console.error("Failed to save events", err);
+      }
     };
-    saveEvents();
+
+    const timeout = setTimeout(saveEvents, 300);
+    return () => clearTimeout(timeout);
   }, [items]);
 
-  const generateRepeatDates = (start: string, repeatType: EventItem['repeat'], monthsAhead = 6) => {
+  const generateRepeatDates = (start: string, repeatType: EventItem['repeat'], repeatEnd?: string, monthsAhead = 6) => {
     const dates: string[] = [];
     const startDate = parseLocalDate(start);
-    let endDate = repeatEndDate ? parseLocalDate(repeatEndDate) : new Date();
-    if (!repeatEndDate) {
+
+    let endDate = repeatEnd ? parseLocalDate(repeatEnd) : new Date();
+    if (!repeatEnd) {
       if (repeatType === 'monthly' || repeatType === 'yearly') endDate.setFullYear(endDate.getFullYear() + 5);
       else endDate.setMonth(endDate.getMonth() + monthsAhead);
     }
     let current = new Date(startDate);
 
     if ((repeatType === 'weekly' || repeatType === 'biweekly') && weeklyDays.length > 0) {
+      const interval = repeatType === 'biweekly' ? 14 : 7;
+
       while (current <= endDate) {
-        if (weeklyDays.includes(current.getDay().toString())) dates.push(formatDate(current));
-        current.setDate(current.getDate() + 1);
+        weeklyDays.forEach(day => {
+          const target = new Date(current);
+          let diff = Number(day) - target.getDay();
+          if (diff < 0) diff += 7;
+          target.setDate(target.getDate() + diff);
+
+          if (target >= startDate && target <= endDate) {
+            const formatted = formatDate(target);
+
+            if (!dates.includes(formatted)) {
+              dates.push(formatted);
+            }
+          }
+        });
+
+        current.setDate(current.getDate() + interval);
       }
     } else {
       while (current <= endDate) {
@@ -136,25 +155,59 @@ const MyCalendar = () => {
         }
       }
     }
-    return dates;
+    return dates.sort((a, b) => a.localeCompare(b));
   };
 
-  const findNextAvailableTime = (date: string): { date: string; time: string } => {
-    const startHour = 9;
-    const endHour = 18;
-    let checkDate = parseLocalDate(date);
+  const findNextAvailableTime = (
+    date: string, 
+    constraints: { days?: string[], maxDate?: string, startTime?: string, endTime?: string }
+): { date: string; time: string } | null => {
+  
+    const startHour = constraints.startTime ? parseInt(constraints.startTime.split(':')[0]) : 9;
+    const startMinute = constraints.startTime ? parseInt(constraints.startTime.split(':')[1]) : 0;
+    const endHour = constraints.endTime ? parseInt(constraints.endTime.split(':')[0]) : 18;
+    const endMinute = constraints.endTime ? parseInt(constraints.endTime.split(':')[1]) : 0;
 
-    while (true) {
+    let checkDate = parseLocalDate(date);
+    const maxDateLimit = constraints.maxDate ? parseLocalDate(constraints.maxDate) : null;
+    let safety = 0;
+
+    while (safety < 3650) {
+      safety++;
       const dateStr = formatDate(checkDate);
-      const occupied = (items[dateStr] || []).filter(e => e.time).map(e => e.time);
-      for (let h = startHour; h < endHour; h++) {
-        for (let m = 0; m < 60; m += 30) {
+    
+      if (maxDateLimit && checkDate > maxDateLimit) return null;
+
+      const dayOfWeek = checkDate.getDay().toString();
+      if (constraints.days && constraints.days.length > 0 && !constraints.days.includes(dayOfWeek)) {
+        checkDate.setDate(checkDate.getDate() + 1);
+        continue;
+      }
+
+      const events = items[dateStr] || [];
+    
+      for (let h = startHour; h <= endHour; h++) {
+        for (let m = (h === startHour ? startMinute : 0); m < 60; m += 30) {
+          const candidateMinutes = h * 60 + m;
+          if (candidateMinutes > (endHour * 60 + endMinute)) break;
+
           const candidate = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
-          if (!occupied.includes(candidate)) return { date: dateStr, time: candidate };
+        
+          const overlaps = events.some(e => {
+            if (!e.time) return false;
+            const [sh, sm] = e.time.split(':').map(Number);
+            const start = sh * 60 + sm;
+            const [eh, em] = (e.endTime || e.time).split(':').map(Number);
+            let end = e.endTime ? eh * 60 + em : start + 30;
+            return candidateMinutes >= start && candidateMinutes < end;
+          });
+
+          if (!overlaps) return { date: dateStr, time: candidate };
         }
       }
       checkDate.setDate(checkDate.getDate() + 1);
     }
+    return null;
   };
 
   const onTimeChange = (e: any, selected?: Date) => {
@@ -164,7 +217,6 @@ const MyCalendar = () => {
       const h = selected.getHours().toString().padStart(2, '0');
       const m = selected.getMinutes().toString().padStart(2, '0');
       setEventTime(`${h}:${m}`);
-      setTimeError(null);
     }
   };
 
@@ -175,18 +227,63 @@ const MyCalendar = () => {
       const h = selected.getHours().toString().padStart(2, '0');
       const m = selected.getMinutes().toString().padStart(2, '0');
       setEventEndTime(`${h}:${m}`);
-      setTimeError(null);
     }
   };
 
   const onRepeatEndChange = (e: any, selected?: Date) => {
     setShowRepeatEndPicker(false);
-    if (selected) setRepeatEndDate(formatDate(selected));
+
+    if (selected) {
+      const start = parseLocalDate(selectedDate);
+      
+      setRepeatEndDate(formatDate(selected));
+      setRepeatEndDateObj(selected);
+    }
+  };
+
+  const getValidationErrors = () => {
+    const errors: {time?: string, date?: string, general?: string} = {};
+  
+    const toMinutes = (t: string) => {
+      const [h, m] = t.split(':').map(Number);
+      return h * 60 + m;
+    };
+
+    if (!eventName.trim()) errors.general = "Event name is required.";
+
+    if (eventType === 'normal') {
+      if (!eventTime) {
+        errors.time = "Start time is required.";
+      } else if (eventEndTime && toMinutes(eventEndTime) <= toMinutes(eventTime)) {
+        errors.time = "End time must be after start time.";
+      }
+    }
+
+    const startDay = parseLocalDate(selectedDate);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    if (startDay < today) {
+      errors.date = "Cannot schedule in the past.";
+    }
+
+    if (eventType === 'normal' && repeat !== 'none' && repeatEndDate) {
+      if (parseLocalDate(repeatEndDate) < startDay) {
+        errors.date = "End date must be after start date.";
+      }
+    }
+
+    return errors;
   };
 
   const addOrUpdateEvent = () => {
     if (!eventName) return;
     if (eventType === 'normal' && !eventTime) return;
+
+    if (editingEvent) {
+      editEventInstance(editingEvent, editAllFuture);
+      return;
+    }
 
     let endTimeFinal =
       eventType === 'normal'
@@ -202,15 +299,24 @@ const MyCalendar = () => {
             return `${endH.toString().padStart(2, '0')}:${endM.toString().padStart(2, '0')}`;
           })()
         : undefined;
+    
+    const toMinutes = (t:string)=>{
+      const [h,m] = t.split(':').map(Number);
+      return h*60+m;
+    }
 
-    if (endTimeFinal && eventTime && endTimeFinal <= eventTime) {
-      setTimeError('End time must be after start time.');
+    const errors = getValidationErrors();
+  
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
       return;
     }
 
-    const originalId = editingEvent?.originalId || Math.random().toString();
+    setFormErrors({});
+
+    const originalId = createId();
     const baseEvent: EventItem = {
-      id: editingEvent?.id || Math.random().toString(),
+      id: createId(),
       originalId,
       name: eventName,
       type: eventType,
@@ -219,31 +325,41 @@ const MyCalendar = () => {
       location: eventLocation,
       repeat: eventType === 'normal' ? repeat : 'none',
       weeklyDays: eventType === 'normal' ? weeklyDays : undefined,
-      height: 70,
       date: selectedDate,
       reminderAssignedTime: undefined,
+      repeatEndDate: repeatEndDate || undefined,
     };
 
-    const dates =
-      baseEvent.repeat && baseEvent.repeat !== 'none' ? generateRepeatDates(selectedDate, baseEvent.repeat) : [selectedDate];
+    const dates = baseEvent.repeat && baseEvent.repeat !== 'none' ? generateRepeatDates(selectedDate, baseEvent.repeat, baseEvent.repeatEndDate) : [selectedDate];
 
     if (eventType === 'reminder') {
-      const { date: assignedDate, time: assignedTime } = findNextAvailableTime(selectedDate);
-      baseEvent.time = assignedTime;
-      baseEvent.reminderAssignedTime = assignedTime;
-      setSelectedDate(assignedDate);
-      setReminderPopup(`Reminder assigned at ${assignedTime} on ${assignedDate}`);
-      setShowReminderModal(true);
-      baseEvent.endTime = undefined;
-      dates.length = 0;
-      dates.push(assignedDate);
+      const result = findNextAvailableTime(selectedDate, {
+        days: weeklyDays,
+        maxDate: repeatEndDate || undefined,
+        startTime: eventTime || '09:00',
+        endTime: eventEndTime || '18:00'
+      });
+
+      if (result) {
+        const { date: assignedDate, time: assignedTime } = result;
+        baseEvent.time = assignedTime;
+        baseEvent.date = assignedDate;
+      } else {
+        setFormErrors({ general: "No available slot found within your constraints." });
+        return;
+      }
     }
 
     setItems(prev => {
-      const newItems = { ...prev };
+      const newItems = {...prev};
       dates.forEach(d => {
         if (!newItems[d]) newItems[d] = [];
-        newItems[d].push({ ...baseEvent, date: d });
+        const exists = newItems[d].some(e =>
+          e.originalId === baseEvent.originalId && e.time === baseEvent.time
+        );
+        if (!exists) {
+          newItems[d].push({ ...baseEvent, id: createId(), date: d });
+        }
       });
       return newItems;
     });
@@ -253,7 +369,7 @@ const MyCalendar = () => {
 
   const deleteEvent = (event: EventItem, allFuture = false) => {
     setItems(prev => {
-      const newItems = { ...prev };
+      const newItems = {...prev};
       if (event.repeat && event.repeat !== 'none' && allFuture && event.originalId) {
         Object.keys(newItems).forEach(d => {
           if (parseLocalDate(d) >= parseLocalDate(event.date)) {
@@ -278,27 +394,81 @@ const MyCalendar = () => {
     setEventLocation(event.location || '');
     setRepeat(event.repeat || 'none');
     setWeeklyDays(event.weeklyDays || []);
-    setRepeatEndDate(repeatEndDate || null);
+    setRepeatEndDate(event.repeatEndDate || null);
     setEventType(event.type || 'normal');
     setConfirmation(null);
+    if (event.repeatEndDate) {
+      const d = parseLocalDate(event.repeatEndDate);
+      setRepeatEndDateObj(d);
+    }
+    if (event.time) {
+      const [h, m] = event.time.split(':').map(Number);
+      const newDate = new Date();
+      newDate.setHours(h, m);
+      setTime(newDate);
+    }
   };
 
   const editEventInstance = (event: EventItem, allFuture = false) => {
+    const toMinutes = (t: string) => {
+      const [h, m] = t.split(':').map(Number);
+      return h * 60 + m;
+    };
+
+    const errors = getValidationErrors();
+  
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
+      return;
+    }
+
+    setFormErrors({});
+
     setItems(prev => {
-      const newItems = { ...prev };
+      const newItems = {...prev};
       if (event.repeat && event.repeat !== 'none' && allFuture && event.originalId) {
         Object.keys(newItems).forEach(d => {
           if (parseLocalDate(d) >= parseLocalDate(event.date)) {
-            newItems[d] = (newItems[d] || []).map(e =>
-              e.originalId === event.originalId
-                ? { ...e, name: eventName, time: eventTime, endTime: eventEndTime, location: eventLocation, weeklyDays }
-                : e
+            newItems[d] = (newItems[d] || []).filter(
+              e => e.originalId !== event.originalId
             );
+
+            if (!newItems[d].length) delete newItems[d];
           }
+        });
+
+        const newDates = generateRepeatDates(
+          event.date,
+          repeat,
+          repeatEndDate || undefined
+        );
+
+        newDates.forEach(d => {
+          if (!newItems[d]) newItems[d] = [];
+
+          newItems[d].push({
+            ...event,
+            id: createId(),
+            date: d,
+            name: eventName,
+            time: eventTime,
+            endTime: eventEndTime,
+            location: eventLocation,
+            repeat,
+            weeklyDays,
+            repeatEndDate: repeatEndDate || undefined
+          });
         });
       } else {
         newItems[event.date] = (newItems[event.date] || []).map(e =>
-          e.id === event.id ? { ...e, name: eventName, time: eventTime, endTime: eventEndTime, location: eventLocation, weeklyDays } : e
+          e.id === event.id ? { 
+            ...e, 
+            name: eventName, 
+            time: event.type === 'reminder' ? event.time : eventTime,
+            endTime: event.type === 'reminder' ? undefined : eventEndTime, 
+            location: eventLocation, 
+            weeklyDays 
+          } : e
         );
       }
       return newItems;
@@ -399,69 +569,52 @@ const MyCalendar = () => {
           />
         </View>
 
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginHorizontal: 10, marginTop: 10 }}>
+          <Text style={{ width: 80 }}>{eventType === 'normal' ? 'Start Time:' : 'Earliest:'}</Text>
+          {Platform.OS === 'web' ? (
+            <input
+              type="time"
+              value={eventTime}
+              onChange={e => {                  
+                setEventTime(e.target.value);
+                setFormErrors({});
+              }}
+              style={{
+                padding: 8,
+                borderRadius: 5,
+                borderWidth: 1,
+                borderColor: formErrors ? 'red' : '#ccc',
+                marginRight: 10,                  
+                flex: 1,
+              }}
+            />
+          ) : (
+            <View style={{ flex: 1, marginRight: 10 }}>
+              <Button title={eventTime || 'Pick Time'} onPress={() => setShowPicker(true)} />
+            </View>
+          )}
+          <Text style={{ width: 80 }}>{eventType === 'normal' ? 'End Time:' : 'Latest:'}</Text>
+          {Platform.OS === 'web' ? (
+            <input
+              type="time"
+              value={eventEndTime}
+              onChange={e => {
+                setEventEndTime(e.target.value);
+                setFormErrors({});
+              }}
+              style={{ padding: 8, borderRadius: 5, borderWidth: 1, borderColor: formErrors ? 'red' : '#ccc', flex: 1 }}
+            />
+          ) : (
+            <View style={{ flex: 1 }}>
+              <Button title={eventEndTime || 'Pick Time'} onPress={() => setShowEndPicker(true)} />
+            </View>
+          )}
+        </View>
+
         {eventType === 'normal' && (
           <View style={{ flexDirection: 'row', alignItems: 'center', marginHorizontal: 10, marginTop: 10 }}>
-            <Text style={{ width: 80 }}>Start:</Text>
-            {Platform.OS === 'web' ? (
-              <input
-                type="time"
-                value={eventTime}
-                onChange={e => {
-                  setEventTime(e.target.value);
-                  setTimeError(null);
-                }}
-                style={{
-                  padding: 8,
-                  borderRadius: 5,
-                  borderWidth: 1,
-                  borderColor: timeError ? 'red' : '#ccc',
-                  marginRight: 10,
-                  flex: 1,
-                }}
-              />
-            ) : (
-              <View style={{ flex: 1, marginRight: 10 }}>
-                <Button title={eventTime || 'Pick Time'} onPress={() => setShowPicker(true)} />
-              </View>
-            )}
-            <Text style={{ width: 80 }}>End:</Text>
-            {Platform.OS === 'web' ? (
-              <input
-                type="time"
-                value={eventEndTime}
-                onChange={e => {
-                  setEventEndTime(e.target.value);
-                  setTimeError(null);
-                }}
-                style={{ padding: 8, borderRadius: 5, borderWidth: 1, borderColor: timeError ? 'red' : '#ccc', flex: 1 }}
-              />
-            ) : (
-              <View style={{ flex: 1 }}>
-                <Button title={eventEndTime || 'Pick Time'} onPress={() => setShowEndPicker(true)} />
-              </View>
-            )}
-          </View>
-        )}
-
-        {timeError && <Text style={{ color: 'red', marginHorizontal: 10, marginTop: 5 }}>{timeError}</Text>}
-
-        <Modal visible={showReminderModal} transparent animationType="fade">
-          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.3)' }}>
-            <View style={{ backgroundColor: 'white', padding: 20, borderRadius: 10 }}>
-              <Text>{reminderPopup}</Text>
-              <Button title="OK" onPress={() => setShowReminderModal(false)} />
-            </View>
-          </View>
-        </Modal>
-
-        {showPicker && <DateTimePicker value={time} mode="time" display="default" onChange={onTimeChange} />}
-        {showEndPicker && <DateTimePicker value={endTime} mode="time" display="default" onChange={onEndTimeChange} />}
-        {showRepeatEndPicker && <DateTimePicker value={time} mode="date" display="default" onChange={onRepeatEndChange} />}
-
-        {eventType === 'normal' && (
-          <View style={{ margin: 10 }}>
-            <Text style={{ marginBottom: 5 }}>Repeat:</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+            <Text style={{ width: 80 }}>Repeat:</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 10 }}>
               {['none', 'daily', 'weekly', 'biweekly', 'monthly', 'yearly'].map(r => (
                 <TouchableOpacity
                   key={r}
@@ -471,35 +624,74 @@ const MyCalendar = () => {
                     backgroundColor: repeat === r ? '#00adf5' : '#ccc',
                     borderRadius: 5,
                     marginRight: 5,
-                    marginBottom: 5,
                   }}
                 >
                   <Text style={{ color: 'white', textTransform: 'capitalize' }}>{r}</Text>
                 </TouchableOpacity>
               ))}
             </View>
+          </View>
+        )}
 
-            {repeat === 'weekly' && (
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 5 }}>
-                {Array.from({ length: 7 }, (_, i) => (
-                  <TouchableOpacity
-                    key={i}
-                    onPress={() =>
-                      setWeeklyDays(prev => (prev.includes(i.toString()) ? prev.filter(d => d !== i.toString()) : [...prev, i.toString()]))
-                    }
-                    style={{
-                      padding: 8,
-                      backgroundColor: weeklyDays.includes(i.toString()) ? '#00adf5' : '#ccc',
-                      borderRadius: 5,
-                      marginRight: 5,
-                      marginBottom: 5,
-                    }}
-                  >
-                    <Text style={{ color: 'white' }}>{['S', 'M', 'T', 'W', 'T', 'F', 'S'][i]}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+        {(repeat !== 'none' || eventType === 'reminder') && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginHorizontal: 10, marginTop: 10 }}>
+            <Text style={{ width: 80 }}>{eventType === 'normal' ? 'End Date:' : 'Last Date:'}</Text>  
+            {Platform.OS === 'web' ? (
+              <input
+                type="date"
+                value={repeatEndDate || ""}
+                onChange={(e) => {
+                  setRepeatEndDate(e.target.value);
+                  setRepeatEndDateObj(new Date(e.target.value));
+                }}
+                style={{
+                  padding: 8,
+                  borderRadius: 5,
+                  borderWidth: 1,
+                  borderColor: formErrors ? 'red' : '#ccc',
+                  marginRight: 10,                  
+                  flex: 1,
+                }}
+              />
+            ) : (
+              <TouchableOpacity
+                onPress={() => setShowRepeatEndPicker(true)}
+                style={{
+                  padding: 8,
+                  borderRadius: 5,
+                  borderWidth: 1,
+                  borderColor: formErrors.date ? 'red' : '#ccc',
+                  flex: 1,
+                }}
+              >
+                <Text>{repeatEndDate || 'Select Date'}</Text>
+              </TouchableOpacity>
             )}
+          </View>
+        )}
+
+        {(repeat === 'weekly' || repeat === 'biweekly' || eventType === 'reminder') && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginHorizontal: 10, marginTop: 10 }}>
+            <Text style={{ width: 80 }}>Days:</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 10 }}>
+              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, i) => (
+                <TouchableOpacity
+                  key={i}
+                  onPress={() =>
+                    setWeeklyDays(prev => (prev.includes(i.toString()) ? prev.filter(d => d !== i.toString()) : [...prev, i.toString()]))
+                  }
+                  style={{
+                    padding: 8,
+                    backgroundColor: weeklyDays.includes(i.toString()) ? '#00adf5' : '#ccc',
+                    borderRadius: 5,
+                    marginRight: 5,
+                    marginBottom: 5
+                  }}
+                >
+                  <Text style={{ color: 'white' }}>{day}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
           </View>
         )}
 
@@ -508,57 +700,104 @@ const MyCalendar = () => {
           <Button title="Reset" onPress={resetForm} color="gray" />
         </View>
 
-        <FlatList data={items[selectedDate] || []} keyExtractor={item => item.id} renderItem={renderItem} />
+        {formErrors && <Text style={{ color: 'red', fontSize: 12, marginHorizontal: 10, marginTop: 5 }}>{formErrors.time}</Text>}
+        {formErrors && (<Text style={{ color: 'red', fontSize: 12, marginHorizontal: 10, marginTop: 5 }}>{formErrors.date}</Text>)}
 
-        {confirmation && (
+        {showPicker && <DateTimePicker value={time} mode="time" display="default" onChange={onTimeChange} />}
+        {showEndPicker && <DateTimePicker value={endTime} mode="time" display="default" onChange={onEndTimeChange} />}
+        {showRepeatEndPicker && <DateTimePicker value={repeatEndDateObj} mode="date" display="default" onChange={onRepeatEndChange} />}
+
+        <FlatList data={[...(items[selectedDate] || [])].sort((a, b) =>  {
+          if (!a.time) return 1;
+          if (!b.time) return -1;
+          return a.time.localeCompare(b.time);
+        })} keyExtractor={item => item.id} renderItem={renderItem} />
+
+      </ScrollView>
+      <Modal visible={!!confirmation} transparent animationType="fade" onRequestClose={resetForm}>
+        <View
+          style={{
+            flex: 1,
+            justifyContent: 'center',
+            alignItems: 'center',
+            backgroundColor: 'rgba(0,0,0,0.3)',
+          }}
+        >
           <View
             style={{
-              position: 'absolute',
-              top: 100,
-              left: 20,
-              right: 20,
-              padding: 20,
               backgroundColor: 'white',
+              padding: 20,
               borderRadius: 10,
-              shadowColor: '#000',
-              shadowOpacity: 0.2,
-              shadowRadius: 5,
-              elevation: 5,
+              width: '85%',
             }}
           >
             <Text style={{ marginBottom: 10 }}>
-              {confirmation.type === 'delete' ? 'Delete this event?' : 'Edit this event?'}
+              {confirmation?.type === 'delete'
+                ? 'Delete this event?'
+                : 'Edit this event?'}
             </Text>
-            {confirmation.event.repeat && confirmation.event.repeat !== 'none' ? (
-              <Text style={{ marginBottom: 10 }}>This is a repeating event. Apply to only this instance or all future?</Text>
+
+            {confirmation?.event.repeat &&
+            confirmation?.event.repeat !== 'none' ? (
+              <Text style={{ marginBottom: 10 }}>
+                This is a repeating event. Apply to only this instance or all future?
+              </Text>
             ) : null}
+
             <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-              {confirmation.type === 'delete' ? (
+              {confirmation?.type === 'delete' ? (
                 <>
-                  {!confirmation.event.repeat || confirmation.event.repeat === 'none' || confirmation.event.type === 'reminder' ? (
+                  {!confirmation?.event.repeat ||
+                  confirmation?.event.repeat === 'none' ||
+                  confirmation?.event.type === 'reminder' ? (
                     <>
-                      <Button title="Confirm" onPress={() => deleteEvent(confirmation.event)} />
+                      <Button
+                        title="Confirm"
+                        onPress={() => {if (confirmation) deleteEvent(confirmation.event);}}
+                      />
                       <Button title="Cancel" onPress={resetForm} color="gray" />
                     </>
                   ) : (
                     <>
-                      <Button title="Only this" onPress={() => deleteEvent(confirmation.event, false)} />
-                      <Button title="All future" onPress={() => deleteEvent(confirmation.event, true)} />
+                      <Button
+                        title="Only this"
+                        onPress={() => {if (confirmation) deleteEvent(confirmation.event, false);}}
+                      />
+                      <Button
+                        title="All future"
+                        onPress={() => {if (confirmation) deleteEvent(confirmation.event, true);}}
+                      />
                       <Button title="Cancel" onPress={resetForm} color="gray" />
                     </>
                   )}
                 </>
               ) : (
                 <>
-                  {!confirmation.event.repeat || confirmation.event.repeat === 'none' ? (
+                  {!confirmation?.event.repeat ||
+                  confirmation?.event.repeat === 'none' ? (
                     <>
-                      <Button title="Yes" onPress={() => startEditingEvent(confirmation.event)} />
+                      <Button
+                        title="Yes"
+                        onPress={() => {if (confirmation) startEditingEvent(confirmation.event);}}
+                      />
                       <Button title="Cancel" onPress={resetForm} color="gray" />
                     </>
                   ) : (
                     <>
-                      <Button title="Only this" onPress={() => startEditingEvent(confirmation.event)} />
-                      <Button title="All future" onPress={() => startEditingEvent(confirmation.event)} />
+                      <Button
+                        title="Only this"
+                        onPress={() => {
+                          setEditAllFuture(false);
+                          if (confirmation) startEditingEvent(confirmation.event);
+                        }}
+                      />
+                      <Button
+                        title="All future"
+                        onPress={() => {
+                          setEditAllFuture(true);
+                          if (confirmation) startEditingEvent(confirmation.event);
+                        }}
+                      />
                       <Button title="Cancel" onPress={resetForm} color="gray" />
                     </>
                   )}
@@ -566,8 +805,16 @@ const MyCalendar = () => {
               )}
             </View>
           </View>
-        )}
-      </ScrollView>
+        </View>
+      </Modal>
+      <Modal visible={showReminderModal} transparent animationType="fade" onRequestClose={resetForm}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.3)' }}>
+          <View style={{ backgroundColor: 'white', padding: 20, borderRadius: 10 }}>
+            <Text>{reminderPopup}</Text>
+            <Button title="OK" onPress={() => setShowReminderModal(false)} />
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 };
