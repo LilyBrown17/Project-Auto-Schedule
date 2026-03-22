@@ -3,6 +3,17 @@ import { View, Text, Button, FlatList, TextInput, Platform, TouchableOpacity, Sc
 import { Calendar, DateData } from 'react-native-calendars';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+// import * as Notifications from 'expo-notifications';
+
+// Notifications.setNotificationHandler({
+  // handleNotification: async () => ({
+    // shouldShowAlert: true,
+    // shouldPlaySound: true,
+    // shouldSetBadge: false,
+    // shouldShowBanner: true,
+    // shouldShowList: true,
+  // }),
+// });
 
 interface EventItem {
   id: string;
@@ -76,6 +87,18 @@ const MyCalendar = () => {
     setReminderPopup(null);
   };
 
+  // useEffect(() => {
+    // if (Platform.OS !== 'web') {
+      // const setupNotifications = async () => {
+        // const { status } = await Notifications.getPermissionsAsync();
+        // if (status !== 'granted') {
+          // await Notifications.requestPermissionsAsync();
+        // }
+      // };
+      // setupNotifications();
+    // }
+  // }, []);
+
   useEffect(() => {
     const loadEvents = async () => {
       try {
@@ -98,6 +121,55 @@ const MyCalendar = () => {
     const timeout = setTimeout(saveEvents, 300);
     return () => clearTimeout(timeout);
   }, [items]);
+
+  // useEffect(() => {
+    // const syncNotifications = async () => {
+      // await Notifications.cancelAllScheduledNotificationsAsync();
+
+      // const now = new Date();
+      // Object.values(items).forEach((dayEvents) => {
+        // dayEvents.forEach((event) => {
+          // if (event.time) {
+            // const [h, m] = event.time.split(':').map(Number);
+            // const eventDate = parseLocalDate(event.date);
+            // eventDate.setHours(h, m, 0, 0);
+
+            // if (eventDate > now) {
+              // scheduleNotification(event);
+            // }
+          // }
+        // });
+      // });
+    // };
+
+    // syncNotifications();
+  // }, [items]);
+
+  // const scheduleNotification = async (event: EventItem) => {
+    // if (!event.time) return;
+
+    // const [hours, minutes] = event.time.split(':').map(Number);
+    // const triggerDate = parseLocalDate(event.date);
+    // triggerDate.setHours(hours, minutes, 0, 0);
+
+    // if (triggerDate <= new Date()) return;
+
+    // try {
+      // await Notifications.scheduleNotificationAsync({
+        // content: {
+          // title: event.name,
+          // body: event.location ? `Location: ${event.location}` : "Upcoming event",
+          // data: { id: event.id, type: event.type },
+          // sound: true,
+        // },
+        // trigger: {
+          // date: triggerDate, 
+        // } as Notifications.DateTriggerInput,
+      // });
+    // } catch (error) {
+    // console.error("Notification scheduling failed:", error);
+    // }
+  // };
 
   const generateRepeatDates = (start: string, repeatType: EventItem['repeat'], repeatEnd?: string, monthsAhead = 6) => {
     const dates: string[] = [];
@@ -358,7 +430,11 @@ const MyCalendar = () => {
           e.originalId === baseEvent.originalId && e.time === baseEvent.time
         );
         if (!exists) {
-          newItems[d].push({ ...baseEvent, id: createId(), date: d });
+          const newEventInstance = { ...baseEvent, id: createId(), date: d };
+      
+          // scheduleNotification(newEventInstance);
+
+          newItems[d].push(newEventInstance);
         }
       });
       return newItems;
@@ -648,8 +724,7 @@ const MyCalendar = () => {
                   padding: 8,
                   borderRadius: 5,
                   borderWidth: 1,
-                  borderColor: formErrors ? 'red' : '#ccc',
-                  marginRight: 10,                  
+                  borderColor: formErrors ? 'red' : '#ccc',         
                   flex: 1,
                 }}
               />
