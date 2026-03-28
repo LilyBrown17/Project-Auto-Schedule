@@ -57,6 +57,7 @@ const MyCalendar = () => {
   const [shouldNotify, setShouldNotify] = useState(false);
   const [notifyBeforeMinutes, setNotifyBeforeMinutes] = useState('5');
   const [triggeredReminders, setTriggeredReminders] = useState<string[]>([]);
+  const [displayDate, setDisplayDate] = useState<string | null>(null);
 
   const createId = () => Date.now().toString(36) + Math.random().toString(36).substring(2);
 
@@ -148,6 +149,13 @@ const MyCalendar = () => {
 
     return () => clearInterval(interval);
   }, [items, triggeredReminders]);
+
+  useEffect(() => {
+    if (displayDate) {
+      setPopupType('reminderBeingSet');
+      setShowReminderModal(true);
+    }
+  }, [displayDate]);
 
   const generateRepeatDates = (start: string, repeatType: EventItem['repeat'], repeatEnd?: string, monthsAhead = 6) => {
     const dates: string[] = [];
@@ -400,8 +408,9 @@ const MyCalendar = () => {
         setFormErrors({ general: "No available slot found within your constraints." });
         return;
       }
-      setPopupType('reminderBeingSet');
-      setShowReminderModal(true);
+
+      const dateSet = formatReminderDateTime(baseEvent); 
+      setDisplayDate(dateSet);
     }
 
     setItems(prev => {
@@ -926,9 +935,9 @@ const MyCalendar = () => {
       <Modal visible={showReminderModal} transparent animationType="fade" onRequestClose={() => setShowReminderModal(false)}>
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.3)' }}>
           <View style={{ backgroundColor: 'white', padding: 20, borderRadius: 10 }}>
-            {eventType === 'reminder' && popupType === 'reminderBeingSet' ? (
+            {popupType === 'reminderBeingSet' ? (
               <Text style={{ marginBottom: 10 }}>
-                {`Reminder scheduled for ${formatReminderDateTime}`}
+                {`Reminder scheduled for ${displayDate}`}
               </Text>
             ) : eventType === 'reminder' && popupType === 'reminderNotification' ? (
               <Text style={{ marginBottom: 10 }}>
