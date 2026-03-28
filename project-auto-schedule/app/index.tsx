@@ -3,17 +3,6 @@ import { View, Text, Button, FlatList, TextInput, Platform, TouchableOpacity, Sc
 import { Calendar, DateData } from 'react-native-calendars';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-// import * as Notifications from 'expo-notifications';
-
-// Notifications.setNotificationHandler({
-  // handleNotification: async () => ({
-    // shouldShowAlert: true,
-    // shouldPlaySound: true,
-    // shouldSetBadge: false,
-    // shouldShowBanner: true,
-    // shouldShowList: true,
-  // }),
-// });
 
 interface EventItem {
   id: string;
@@ -32,6 +21,8 @@ interface EventItem {
   reminderMaxDate?: string;
   reminderStartTime?: string;
   reminderEndTime?: string;
+  shouldNotify?: boolean;
+  notifyBeforeMinutes?: number;
 }
 
 const STORAGE_KEY = 'calendar_events';
@@ -61,8 +52,11 @@ const MyCalendar = () => {
   const [showRepeatEndPicker, setShowRepeatEndPicker] = useState(false);
   const [confirmation, setConfirmation] = useState<{ type: 'delete' | 'edit'; event: EventItem } | null>(null);
   const [formErrors, setFormErrors] = useState<{time?: string, date?: string, general?: string}>({});
-  const [reminderPopup, setReminderPopup] = useState<string | null>(null);
   const [showReminderModal, setShowReminderModal] = useState(false);
+  const [popupType, setPopupType] = useState<"reminderBeingSet" | "reminderNotification" | "normalEventNotification" | "none">("none");
+  const [shouldNotify, setShouldNotify] = useState(false);
+  const [notifyBeforeMinutes, setNotifyBeforeMinutes] = useState('5');
+  const [triggeredReminders, setTriggeredReminders] = useState<string[]>([]);
 
   const createId = () => Date.now().toString(36) + Math.random().toString(36).substring(2);
 
@@ -84,20 +78,10 @@ const MyCalendar = () => {
     setConfirmation(null);
     setEventType('normal');
     setFormErrors({});
-    setReminderPopup(null);
+    setPopupType('none');
+    setShouldNotify(false);
+    setNotifyBeforeMinutes('5');
   };
-
-  // useEffect(() => {
-    // if (Platform.OS !== 'web') {
-      // const setupNotifications = async () => {
-        // const { status } = await Notifications.getPermissionsAsync();
-        // if (status !== 'granted') {
-          // await Notifications.requestPermissionsAsync();
-        // }
-      // };
-      // setupNotifications();
-    // }
-  // }, []);
 
   useEffect(() => {
     const loadEvents = async () => {
@@ -122,54 +106,48 @@ const MyCalendar = () => {
     return () => clearTimeout(timeout);
   }, [items]);
 
-  // useEffect(() => {
-    // const syncNotifications = async () => {
-      // await Notifications.cancelAllScheduledNotificationsAsync();
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = new Date();
+      const currentDate = formatDate(now);
+      const todayEvents = items[currentDate] || [];
 
-      // const now = new Date();
-      // Object.values(items).forEach((dayEvents) => {
-        // dayEvents.forEach((event) => {
-          // if (event.time) {
-            // const [h, m] = event.time.split(':').map(Number);
-            // const eventDate = parseLocalDate(event.date);
-            // eventDate.setHours(h, m, 0, 0);
+      todayEvents.forEach(event => {
+        if (!event.time) return;
 
-            // if (eventDate > now) {
-              // scheduleNotification(event);
-            // }
-          // }
-        // });
-      // });
-    // };
+        const [h, m] = event.time.split(':').map(Number);
+        const eventDate = new Date();
+        eventDate.setHours(h, m, 0, 0);
 
-    // syncNotifications();
-  // }, [items]);
+        const diffMs = eventDate.getTime() - now.getTime();
+        const diffMinutes = Math.floor(diffMs / 60000);
 
-  // const scheduleNotification = async (event: EventItem) => {
-    // if (!event.time) return;
+        if (
+          event.type === 'reminder' &&
+          diffMinutes === 0 &&
+          !triggeredReminders.includes(event.id)
+        ) {
+          setPopupType('reminderNotification');
+          setShowReminderModal(true);
+          setTriggeredReminders(prev => [...prev, event.id]);
+        }
 
-    // const [hours, minutes] = event.time.split(':').map(Number);
-    // const triggerDate = parseLocalDate(event.date);
-    // triggerDate.setHours(hours, minutes, 0, 0);
+        if (
+          event.type === 'normal' &&
+          event.shouldNotify &&
+          event.notifyBeforeMinutes !== undefined &&
+          diffMinutes === event.notifyBeforeMinutes &&
+          !triggeredReminders.includes(event.id)
+        ) {
+          setPopupType('normalEventNotification');
+          setShowReminderModal(true);
+          setTriggeredReminders(prev => [...prev, event.id]);
+        }
+      });
+    }, 30000);
 
-    // if (triggerDate <= new Date()) return;
-
-    // try {
-      // await Notifications.scheduleNotificationAsync({
-        // content: {
-          // title: event.name,
-          // body: event.location ? `Location: ${event.location}` : "Upcoming event",
-          // data: { id: event.id, type: event.type },
-          // sound: true,
-        // },
-        // trigger: {
-          // date: triggerDate, 
-        // } as Notifications.DateTriggerInput,
-      // });
-    // } catch (error) {
-    // console.error("Notification scheduling failed:", error);
-    // }
-  // };
+    return () => clearInterval(interval);
+  }, [items, triggeredReminders]);
 
   const generateRepeatDates = (start: string, repeatType: EventItem['repeat'], repeatEnd?: string, monthsAhead = 6) => {
     const dates: string[] = [];
@@ -400,6 +378,8 @@ const MyCalendar = () => {
       date: selectedDate,
       reminderAssignedTime: undefined,
       repeatEndDate: repeatEndDate || undefined,
+      shouldNotify: eventType === 'normal' ? shouldNotify : true,
+      notifyBeforeMinutes: eventType === 'normal' && shouldNotify ? Number(notifyBeforeMinutes) : undefined,
     };
 
     const dates = baseEvent.repeat && baseEvent.repeat !== 'none' ? generateRepeatDates(selectedDate, baseEvent.repeat, baseEvent.repeatEndDate) : [selectedDate];
@@ -420,6 +400,8 @@ const MyCalendar = () => {
         setFormErrors({ general: "No available slot found within your constraints." });
         return;
       }
+      setPopupType('reminderBeingSet');
+      setShowReminderModal(true);
     }
 
     setItems(prev => {
@@ -431,8 +413,6 @@ const MyCalendar = () => {
         );
         if (!exists) {
           const newEventInstance = { ...baseEvent, id: createId(), date: d };
-      
-          // scheduleNotification(newEventInstance);
 
           newItems[d].push(newEventInstance);
         }
@@ -569,6 +549,27 @@ const MyCalendar = () => {
     return marks;
   }, [items, selectedDate]);
 
+  const formatReminderDateTime = (event: EventItem) => {
+    if (!event.time) return null;
+
+    const [h, m] = event.time.split(':').map(Number);
+    const eventDate = parseLocalDate(event.date);
+    eventDate.setHours(h, m, 0, 0);
+
+    const formattedDate = eventDate.toLocaleDateString(undefined, {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+    });
+
+    const formattedTime = eventDate.toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    return `${formattedDate} at ${formattedTime}`;
+  };
+
   const renderItem = ({ item }: { item: EventItem }) => (
     <View
       style={{
@@ -588,6 +589,16 @@ const MyCalendar = () => {
       ) : null}
       {item.location ? <Text style={{ color: 'gray' }}>{item.location}</Text> : null}
       {item.repeat && item.repeat !== 'none' ? <Text style={{ color: 'purple' }}>Repeats: {item.repeat}</Text> : null}
+      {item.type === 'normal' && !!item.shouldNotify && (
+        <Text style={{ color: '#cc0000', marginTop: 5, fontWeight: '500' }}>
+          {`🔔 Reminder: ${formatReminderDateTime(item)}`}
+        </Text>
+      )}
+      {item.type === 'normal' && !item.shouldNotify && (
+        <Text style={{ color: '#999', marginTop: 5, fontSize: 12 }}>
+          🕒 No notification set
+        </Text>
+      )}
       <View style={{ flexDirection: 'row', marginTop: 5 }}>
         <TouchableOpacity onPress={() => askEditEvent(item)} style={{ marginRight: 15 }}>
           <Text style={{ color: 'blue' }}>Edit</Text>
@@ -770,6 +781,36 @@ const MyCalendar = () => {
           </View>
         )}
 
+        {eventType === 'normal' && (
+          <View style={{ marginHorizontal: 10, marginTop: 10 }}>
+            <TouchableOpacity onPress={() => setShouldNotify(prev => !prev)} style={{
+              padding: 8,
+              backgroundColor: shouldNotify ? '#00adf5' : '#ccc',
+              borderRadius: 5,
+              marginBottom: 5
+            }}>
+              <Text style={{ color: 'white' }}>
+                {shouldNotify ? 'Reminder ON' : 'Reminder OFF'}
+              </Text>
+            </TouchableOpacity>
+
+            {shouldNotify && (
+              <TextInput
+                value={notifyBeforeMinutes}
+                onChangeText={setNotifyBeforeMinutes}
+                keyboardType="numeric"
+                placeholder="Minutes before"
+                style={{
+                  borderWidth: 1,
+                  borderColor: '#ccc',
+                  padding: 8,
+                  borderRadius: 5
+                }}
+              />
+            )}
+          </View>
+        )}
+
         <View style={{ margin: 10, flexDirection: 'row', justifyContent: 'space-between' }}>
           <Button title={editingEvent ? 'Update Event' : 'Add Event'} onPress={addOrUpdateEvent} />
           <Button title="Reset" onPress={resetForm} color="gray" />
@@ -882,10 +923,22 @@ const MyCalendar = () => {
           </View>
         </View>
       </Modal>
-      <Modal visible={showReminderModal} transparent animationType="fade" onRequestClose={resetForm}>
+      <Modal visible={showReminderModal} transparent animationType="fade" onRequestClose={() => setShowReminderModal(false)}>
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.3)' }}>
           <View style={{ backgroundColor: 'white', padding: 20, borderRadius: 10 }}>
-            <Text>{reminderPopup}</Text>
+            {eventType === 'reminder' && popupType === 'reminderBeingSet' ? (
+              <Text style={{ marginBottom: 10 }}>
+                {`Reminder scheduled for ${formatReminderDateTime}`}
+              </Text>
+            ) : eventType === 'reminder' && popupType === 'reminderNotification' ? (
+              <Text style={{ marginBottom: 10 }}>
+                {`Reminder: ${eventName}`}
+              </Text>
+            ) : eventType === 'normal' && popupType === 'normalEventNotification' ? (
+              <Text style={{ marginBottom: 10 }}>
+                {`Upcoming: ${eventName} is in ${notifyBeforeMinutes} minutes`}
+              </Text>
+            ) : null}
             <Button title="OK" onPress={() => setShowReminderModal(false)} />
           </View>
         </View>
