@@ -128,6 +128,7 @@ const MyCalendar = () => {
           diffMinutes === 0 &&
           !triggeredReminders.includes(event.id)
         ) {
+          setEventName(event.name);
           setPopupType('reminderNotification');
           setShowReminderModal(true);
           setTriggeredReminders(prev => [...prev, event.id]);
@@ -140,6 +141,7 @@ const MyCalendar = () => {
           diffMinutes === event.notifyBeforeMinutes &&
           !triggeredReminders.includes(event.id)
         ) {
+          setEventName(event.name);
           setPopupType('normalEventNotification');
           setShowReminderModal(true);
           setTriggeredReminders(prev => [...prev, event.id]);
@@ -561,8 +563,18 @@ const MyCalendar = () => {
   const formatReminderDateTime = (event: EventItem) => {
     if (!event.time) return null;
 
-    const [h, m] = event.time.split(':').map(Number);
+    let [h, m] = event.time.split(':').map(Number);
     const eventDate = parseLocalDate(event.date);
+
+  if (event.type === 'normal' && event.notifyBeforeMinutes) {
+    let totalMinutes = h * 60 + m - event.notifyBeforeMinutes;
+    
+    if (totalMinutes < 0) totalMinutes += 1440; 
+    
+    h = Math.floor(totalMinutes / 60);
+    m = totalMinutes % 60;
+  }
+
     eventDate.setHours(h, m, 0, 0);
 
     const formattedDate = eventDate.toLocaleDateString(undefined, {
@@ -939,13 +951,13 @@ const MyCalendar = () => {
               <Text style={{ marginBottom: 10 }}>
                 {`Reminder scheduled for ${displayDate}`}
               </Text>
-            ) : eventType === 'reminder' && popupType === 'reminderNotification' ? (
+            ) : popupType === 'reminderNotification' ? (
               <Text style={{ marginBottom: 10 }}>
-                {`Reminder: ${eventName}`}
+                {`Reminder: "${eventName}"`}
               </Text>
-            ) : eventType === 'normal' && popupType === 'normalEventNotification' ? (
+            ) : popupType === 'normalEventNotification' ? (
               <Text style={{ marginBottom: 10 }}>
-                {`Upcoming: ${eventName} is in ${notifyBeforeMinutes} minutes`}
+                {`Upcoming: "${eventName}" is in ${notifyBeforeMinutes} minutes`}
               </Text>
             ) : null}
             <Button title="OK" onPress={() => setShowReminderModal(false)} />
