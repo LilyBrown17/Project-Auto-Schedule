@@ -125,7 +125,8 @@ const MyCalendar = () => {
 
         if (
           event.type === 'reminder' &&
-          diffMinutes === 0 &&
+          diffMinutes >= 0 && 
+          diffMinutes < 1 &&
           !triggeredReminders.includes(event.id)
         ) {
           setEventName(event.name);
@@ -138,7 +139,8 @@ const MyCalendar = () => {
           event.type === 'normal' &&
           event.shouldNotify &&
           event.notifyBeforeMinutes !== undefined &&
-          diffMinutes === event.notifyBeforeMinutes &&
+          diffMinutes <= event.notifyBeforeMinutes &&
+          diffMinutes > event.notifyBeforeMinutes - 1 &&
           !triggeredReminders.includes(event.id)
         ) {
           setEventName(event.name);
@@ -319,6 +321,12 @@ const MyCalendar = () => {
       }
     }
 
+    if (eventType === 'reminder' && eventTime && eventEndTime) {
+      if (toMinutes(eventEndTime) <= toMinutes(eventTime)) {
+        errors.time = "End time must be after start time.";
+      }
+    }
+
     const startDay = parseLocalDate(selectedDate);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -374,6 +382,8 @@ const MyCalendar = () => {
 
     setFormErrors({});
 
+    const normalizedNotifyMinutes = Number(notifyBeforeMinutes);
+
     const originalId = createId();
     const baseEvent: EventItem = {
       id: createId(),
@@ -389,10 +399,10 @@ const MyCalendar = () => {
       reminderAssignedTime: undefined,
       repeatEndDate: repeatEndDate || undefined,
       shouldNotify: eventType === 'normal' ? shouldNotify : true,
-      notifyBeforeMinutes: eventType === 'normal' && shouldNotify ? Number(notifyBeforeMinutes) : undefined,
+      notifyBeforeMinutes: eventType === 'normal' && shouldNotify && !isNaN(normalizedNotifyMinutes) ? normalizedNotifyMinutes : undefined,
     };
 
-    const dates = baseEvent.repeat && baseEvent.repeat !== 'none' ? generateRepeatDates(selectedDate, baseEvent.repeat, baseEvent.repeatEndDate) : [selectedDate];
+    const dates = eventType === 'reminder' ? [] : baseEvent.repeat && baseEvent.repeat !== 'none' ? generateRepeatDates(selectedDate, baseEvent.repeat, baseEvent.repeatEndDate) : [selectedDate];
 
     if (eventType === 'reminder') {
       const result = findNextAvailableTime(selectedDate, {
@@ -411,8 +421,27 @@ const MyCalendar = () => {
         return;
       }
 
+      const { date: assignedDate, time: assignedTime } = result;
+
+      const newEvent = {
+        ...baseEvent,
+        id: createId(),
+        date: assignedDate,
+        time: assignedTime,
+      };
+
+      setItems(prev => {
+        const newItems = { ...prev };
+        if (!newItems[assignedDate]) newItems[assignedDate] = [];
+        newItems[assignedDate].push(newEvent);
+        return newItems;
+      });
+
       const dateSet = formatReminderDateTime(baseEvent); 
       setDisplayDate(dateSet);
+
+      resetForm();
+      return;
     }
 
     setItems(prev => {
@@ -481,6 +510,7 @@ const MyCalendar = () => {
       const [h, m] = t.split(':').map(Number);
       return h * 60 + m;
     };
+    const normalizedNotifyMinutes = Number(notifyBeforeMinutes);
 
     const errors = getValidationErrors();
   
@@ -523,7 +553,9 @@ const MyCalendar = () => {
             location: eventLocation,
             repeat,
             weeklyDays,
-            repeatEndDate: repeatEndDate || undefined
+            repeatEndDate: repeatEndDate || undefined,
+            shouldNotify,
+            notifyBeforeMinutes: shouldNotify && !isNaN(normalizedNotifyMinutes) ? normalizedNotifyMinutes : undefined,
           });
         });
       } else {
@@ -569,7 +601,10 @@ const MyCalendar = () => {
   if (event.type === 'normal' && event.notifyBeforeMinutes) {
     let totalMinutes = h * 60 + m - event.notifyBeforeMinutes;
     
-    if (totalMinutes < 0) totalMinutes += 1440; 
+    if (totalMinutes < 0) {
+      totalMinutes += 1440;
+      eventDate.setDate(eventDate.getDate() - 1);
+    }
     
     h = Math.floor(totalMinutes / 60);
     m = totalMinutes % 60;
@@ -664,7 +699,7 @@ const MyCalendar = () => {
           <TextInput
             value={eventName}
             onChangeText={setEventName}
-            style={{ borderWidth: 1, borderColor: '#ccc', padding: 8, flex: 1, borderRadius: 5 }}
+            style={{ borderWidth: 1, borderColor: '#ccc', backgroundColor: 'white', padding: 8, flex: 1, borderRadius: 5 }}
           />
         </View>
 
@@ -673,7 +708,7 @@ const MyCalendar = () => {
           <TextInput
             value={eventLocation}
             onChangeText={setEventLocation}
-            style={{ borderWidth: 1, borderColor: '#ccc', padding: 8, flex: 1, borderRadius: 5 }}
+            style={{ borderWidth: 1, borderColor: '#ccc', backgroundColor: 'white', padding: 8, flex: 1, borderRadius: 5 }}
           />
         </View>
 
@@ -691,7 +726,7 @@ const MyCalendar = () => {
                 padding: 8,
                 borderRadius: 5,
                 borderWidth: 1,
-                borderColor: formErrors ? 'red' : '#ccc',
+                borderColor: formErrors.time ? 'red' : '#ccc',
                 marginRight: 10,                  
                 flex: 1,
               }}
@@ -710,7 +745,7 @@ const MyCalendar = () => {
                 setEventEndTime(e.target.value);
                 setFormErrors({});
               }}
-              style={{ padding: 8, borderRadius: 5, borderWidth: 1, borderColor: formErrors ? 'red' : '#ccc', flex: 1 }}
+              style={{ padding: 8, borderRadius: 5, borderWidth: 1, borderColor: formErrors.time ? 'red' : '#ccc', flex: 1 }}
             />
           ) : (
             <View style={{ flex: 1 }}>
@@ -756,7 +791,7 @@ const MyCalendar = () => {
                   padding: 8,
                   borderRadius: 5,
                   borderWidth: 1,
-                  borderColor: formErrors ? 'red' : '#ccc',         
+                  borderColor: formErrors.date ? 'red' : '#ccc',         
                   flex: 1,
                 }}
               />
@@ -811,23 +846,21 @@ const MyCalendar = () => {
               marginBottom: 5
             }}>
               <Text style={{ color: 'white' }}>
-                {shouldNotify ? 'Reminder ON' : 'Reminder OFF'}
+                {shouldNotify ? 'Notification ON' : 'Notification OFF'}
               </Text>
             </TouchableOpacity>
 
             {shouldNotify && (
-              <TextInput
-                value={notifyBeforeMinutes}
-                onChangeText={setNotifyBeforeMinutes}
-                keyboardType="numeric"
-                placeholder="Minutes before"
-                style={{
-                  borderWidth: 1,
-                  borderColor: '#ccc',
-                  padding: 8,
-                  borderRadius: 5
-                }}
-              />
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 5}}>
+                <Text style={{ width: 80 }}>Minutes:</Text>
+                <TextInput
+                  value={notifyBeforeMinutes}
+                  onChangeText={setNotifyBeforeMinutes}
+                  keyboardType="numeric"
+                  placeholder="Minutes before"
+                  style={{ borderWidth: 1, borderColor: '#ccc', backgroundColor: 'white', padding: 8, flex: 1, borderRadius: 5 }}
+                />
+              </View>
             )}
           </View>
         )}
