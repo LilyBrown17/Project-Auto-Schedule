@@ -223,7 +223,7 @@ const MyCalendar = () => {
   const findNextAvailableTime = (
     date: string, 
     constraints: { days?: string[], maxDate?: string, startTime?: string, endTime?: string }
-): { date: string; time: string } | null => {
+  ): { date: string; time: string } | null => {
   
     const startHour = constraints.startTime ? parseInt(constraints.startTime.split(':')[0]) : 9;
     const startMinute = constraints.startTime ? parseInt(constraints.startTime.split(':')[1]) : 0;
